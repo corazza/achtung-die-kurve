@@ -14,10 +14,10 @@ def main():
     render = True
 
     meanRewards = []
-    numberOfEvaluations = 100
+    numberOfEpisodes = 100
     eval = 0
 
-    while eval < numberOfEvaluations:
+    while eval < numberOfEpisodes:
         eval += 1
         obs, done = env.reset(), False
         episode_rew = 0
@@ -27,7 +27,6 @@ def main():
                 env.render()
 
             action = agent.act(obs, rew, done)
-
             obs, rew, done, _ = env.step(action)
             time.sleep(0.1)
 
