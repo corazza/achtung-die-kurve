@@ -48,7 +48,6 @@ class AchtungDieKurveAgainstBot(AchtungDieKurve):
         self.clock = pygame.time.Clock()
 
     def _step(self):
-
         self._handle_human_player_events()
         self.humanplayer.update()
         if self.collision(self.humanplayer.x, self.humanplayer.y, self.humanplayer.skip):

@@ -1,3 +1,4 @@
+from telnetlib import IP
 import pygame
 import sys
 import math
@@ -5,6 +6,7 @@ import random
 #import .base
 import time
 import random
+import IPython
 from gym import spaces
 import gym
 from pygame.constants import KEYDOWN, KEYUP, K_F15
@@ -34,7 +36,6 @@ BEAM_STEP = 30
 BEAMS = range(BEAM_MAX_ANGLE, -BEAM_MAX_ANGLE-BEAM_STEP, -BEAM_STEP)
 
 
-# basically just holds onto all of them
 class AchtungPlayer:
     def __init__(self, color, width):
         self.color = color
@@ -102,7 +103,7 @@ class AchtungPlayer:
         self.move()
 
 
-class AchtungDieKurve(gym.Env):
+class AchtungPmf(gym.Env):
     metadata = {'render.modes': ['human', 'rgb_array']}
     """
     Parameters
@@ -139,7 +140,6 @@ class AchtungDieKurve(gym.Env):
         self.force_fps = force_fps
         self.viewer = None
         self.add_noop_action = add_noop_action
-        self.last_action = []
         self.action = []
         self.height = height
         self.width = width
@@ -168,7 +168,7 @@ class AchtungDieKurve(gym.Env):
         Setups up the pygame env, the display and game clock.
         """
         pygame.init()
-        self.screen = pygame.display.set_mode(self.getScreenDims(), 0, 32)
+        self.screen = pygame.display.set_mode(self.getScreenDims())
         self.clock = pygame.time.Clock()
 
     def getActions(self):
@@ -194,6 +194,15 @@ class AchtungDieKurve(gym.Env):
             actions.append(self.NOOP)
         return actions
 
+    def _randomize_other_control(self):
+        x = random.random()
+        if self.ticks % 10 == 0:
+            if x < 0.5:
+                self.other_agent.angle += 10
+            else:
+                self.other_agent.angle -= 10
+            self.other_agent.angle = self.other_agent.angle % 360
+
     def _handle_player_events(self):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -205,38 +214,6 @@ class AchtungDieKurve(gym.Env):
                 if key == pygame.K_ESCAPE:
                     pygame.quit()
                     sys.exit()
-
-                if key == self.actions["left"]:
-                    self.player.angle -= 10
-
-                if key == self.actions["right"]:
-                    self.player.angle += 10
-
-    def setAction(self, action, last_action):
-        """
-        Pushes the action to the pygame event queue.
-        """
-        if action is None:
-            action = self.NOOP
-
-        if last_action is None:
-            last_action = self.NOOP
-
-        kd = pygame.event.Event(KEYDOWN, {"key": action})
-        ku = pygame.event.Event(KEYUP, {"key": last_action})
-
-        pygame.event.post(kd)
-        pygame.event.post(ku)
-
-    def _setAction(self, action):
-        """
-            Instructs the game to perform an action if its not a NOOP
-        """
-
-        if action is not None:
-            self.setAction(action, self.last_action)
-
-        self.last_action = action
 
     def act(self, action):
         """
@@ -268,9 +245,13 @@ class AchtungDieKurve(gym.Env):
         if action not in self.getActions():
             action = self.NOOP
 
-        self._setAction(action)
         for i in range(self.num_steps):
             time_elapsed = self._tick()
+            if action == self.actions["left"]:
+                self.agent.angle -= 10
+            if action == self.actions["right"]:
+                self.agent.angle += 10
+            self.agent.angle = self.agent.angle % 360
             self._step()
 
         self.frame_count += self.num_steps
@@ -302,8 +283,7 @@ class AchtungDieKurve(gym.Env):
         return self.clock.tick_busy_loop(fps)
 
     def getGameState(self):
-
-        state = np.hstack(([self.player.x, self.player.y, self.player.angle], self.player.beams))
+        state = np.hstack(([self.agent.x, self.agent.y, self.agent.angle], self.agent.beams))
         return state
 
     def getScreenDims(self):
@@ -313,7 +293,9 @@ class AchtungDieKurve(gym.Env):
         return self.score
 
     def game_over(self):
-        return self.lives == -1
+        # return self.lives == -1
+        assert(self.lives >= 0 and self.other_lives >= 0)
+        return self.lives <= 0 or self.other_lives <= 0
 
     def setRNG(self, rng):
         if self.rng is None:
@@ -323,26 +305,40 @@ class AchtungDieKurve(gym.Env):
         """
             Starts/Resets the game to its inital state
         """
-        self.player = AchtungPlayer(BLUE, RADIUS)
+        self.agent = AchtungPlayer(BLUE, RADIUS)
+        self.other_agent = AchtungPlayer(GREEN, RADIUS)
         self.screen.fill(self.BG_COLOR)
         self.score = 0
+        self.other_score = 0
         self.ticks = 0
         self.lives = 1
+        self.other_lives = 1
         self.sight = BEAM_SIGHT
 
     def _step(self):
         """
             Perform one step of game emulation.
         """
-
         self.ticks += 1
-        self._handle_player_events()
         self.score += self.rewards["tick"]
-        self.player.update()
-        if self.collision(self.player.x, self.player.y, self.player.skip):
-            self.lives = -1
-        self.player.beam(self.screen)
-        self.player.draw(self.screen)
+        self.other_score += self.rewards['tick']
+
+        self._handle_player_events()
+        self._randomize_other_control()
+        self.other_agent.update()
+        if self.collision(self.other_agent.x, self.other_agent.y, self.other_agent.skip):
+            self.other_lives -= 1
+            self.reset()
+        self.other_agent.beam(self.screen)
+        self.other_agent.draw(self.screen)
+
+        self.agent.update()
+        if self.collision(self.agent.x, self.agent.y, self.agent.skip):
+            self.lives -= 1
+        self.agent.beam(self.screen)
+        self.agent.draw(self.screen)
+
+
         self.draw_text()
 
     def collision(self, x, y, skip):
@@ -352,7 +348,6 @@ class AchtungDieKurve(gym.Env):
                       (x > self.width)
             y_check = (y < 0) or \
                       (y > self.height)
-
             collide_check = self.screen.get_at((x, y)) != self.BG_COLOR
         except IndexError:
             x_check = (x < 0) or (x > self.width)
@@ -373,7 +368,6 @@ class AchtungDieKurve(gym.Env):
 
     def reset(self):
         self.observation_space = spaces.Box(low=0, high=WINWIDTH, shape=(12,), dtype=np.uint8)
-        self.last_action = []
         self.action = []
         self.previous_score = 0.0
         self.init()
@@ -418,20 +412,3 @@ class AchtungDieKurve(gym.Env):
         rng = np.random.RandomState(seed)
         self.rng = rng
         self.init()
-
-
-if __name__ == "__main__":
-
-    pygame.init()
-    game = AchtungDieKurve(width=WINWIDTH, height=WINHEIGHT)
-    game.clock = pygame.time.Clock()
-    game.rng = np.random.RandomState(24)
-    game.init()
-
-    while True:
-        if game.game_over():
-            game.init()
-
-        dt = game.clock.tick_busy_loop(30)
-        game.step(dt)
-        pygame.display.update()

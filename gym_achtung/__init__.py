@@ -39,3 +39,11 @@ register(
     reward_threshold=1.0,
     nondeterministic=True,
 )
+
+register(
+    id='AchtungPmf-v1',
+    entry_point='gym_achtung.envs:AchtungPmf',
+    max_episode_steps=100000,
+    reward_threshold=1.0,
+    nondeterministic=True,
+)

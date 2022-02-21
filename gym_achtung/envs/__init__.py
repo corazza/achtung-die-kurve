@@ -3,5 +3,5 @@ from gym_achtung.envs.achtungdiekurve_randomopponent import AchtungDieKurveRando
 from gym_achtung.envs.achtungdiekurve_fullimage import AchtungDieKurveFullImage
 from gym_achtung.envs.achtungdiekurve_fullimage_opponents import AchtungDieKurveFullImageRandomOpponent
 from gym_achtung.envs.achtungdiekurveAgainstBot import AchtungDieKurveAgainstBot
-
+from gym_achtung.envs.achtungpmf import AchtungPmf
 
