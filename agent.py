@@ -7,6 +7,8 @@ from tensorflow.keras.optimizers import Adam, RMSprop
 import tensorflow as tf
 import numpy as np
 import IPython
+import os
+import json
 
 from const import *
 
@@ -18,7 +20,7 @@ class RandomAgent(object):
     def act(self, observation, reward, done):
         return self.action_space.sample()
 
-# def build_q_network(n_actions, learning_rate=0.00001, input_shape=(84, 84), history_length=4):
+# def build_q_network_old(n_actions, input_shape, history_length, learning_rate):
 #     """Builds a dueling DQN as a Keras model
 #     Arguments:
 #         n_actions: Number of possible action the agent can take
@@ -28,7 +30,7 @@ class RandomAgent(object):
 #     Returns:
 #         A compiled Keras model
 #     """
-#     model_input = Input(shape=(input_shape[0], history_length))
+#     model_input = Input(shape=(input_shape[0], input_shape[1], history_length))
 #     x = Lambda(lambda layer: layer / 255)(model_input)
 
 #     x = Conv2D(32, (8, 8), strides=4, kernel_initializer=VarianceScaling(scale=2.), activation='relu', use_bias=False)(
@@ -54,17 +56,27 @@ class RandomAgent(object):
 
 #     model = Model(model_input, q_vals)
 #     model.compile(Adam(learning_rate), loss=tf.keras.losses.Huber())
-
+#     IPython.embed()
 #     return model
 
 def build_q_network(n_actions, input_shape, history_length, learning_rate):
-    inputs = Input(shape=(input_shape[0], history_length))
-    layer1 = Dense(24, activation="relu")(inputs)
-    layer2 = Dense(48, activation="relu")(layer1)
-    layer3 = Dense(24, activation="relu")(layer2)
-    action = Dense(n_actions, activation="linear")(layer3)
+    init = tf.initializers.he_uniform()
+    inputs = Input(shape=(input_shape[0], history_length), name='inputs')
+    flat = Flatten(name='flat')(inputs)
+    layer1 = Dense(24, activation="relu", name='layer1', kernel_initializer=init)(flat)
+    layer2 = Dense(12, activation="relu", name='layer2', kernel_initializer=init)(layer1)
+    layer3 = Dense(6, activation="relu", name='layer3', kernel_initializer=init)(layer2)
+    action = Dense(n_actions, activation="linear", name='action', kernel_initializer=init)(layer3)
     model = Model(inputs=inputs, outputs=action)
     model.compile(Adam(learning_rate), loss=tf.keras.losses.Huber())
+
+    # model = tf.keras.Sequential()
+    # model.add(tf.keras.layers.Flatten())
+    # model.add(tf.keras.layers.Dense(24, input_shape=(input_shape[0], history_length), activation='relu', kernel_initializer=init))
+    # model.add(tf.keras.layers.Dense(12, activation='relu', kernel_initializer=init))
+    # model.add(tf.keras.layers.Dense(n_actions, activation='linear', kernel_initializer=init))
+
+    # model.compile(loss=tf.keras.losses.Huber(), optimizer=tf.keras.optimizers.Adam(lr=learning_rate), metrics=['accuracy'])
     return model
 
 class ReplayBuffer:
@@ -82,9 +94,9 @@ class ReplayBuffer:
         self.count = 0
         self.current = 0
 
-        self.actions = np.empty(self.size, dtype=np.int32)
+        self.actions = np.empty(self.size, dtype=np.uint8)
         self.rewards = np.empty(self.size, dtype=np.float32)
-        self.frames = np.empty((self.size, self.input_shape[0]), dtype=np.uint8)
+        self.frames = np.empty((self.size, self.input_shape[0]), dtype=np.float32)
         self.terminal_flags = np.empty(self.size, dtype=np.bool)
         self.priorities = np.zeros(self.size, dtype=np.float32)
 
@@ -159,8 +171,8 @@ class ReplayBuffer:
             states.append(self.frames[idx - self.history_length:idx, ...])
             new_states.append(self.frames[idx - self.history_length + 1:idx + 1, ...])
 
-        states = np.transpose(np.asarray(states), axes=(0, 2, 3, 1))
-        new_states = np.transpose(np.asarray(new_states), axes=(0, 2, 3, 1))
+        states = np.transpose(np.asarray(states), axes=(0, 2, 1))
+        new_states = np.transpose(np.asarray(new_states), axes=(0, 2, 1))
 
         if self.use_per:
             # Get importance weights from probabilities calculated earlier
@@ -182,12 +194,31 @@ class ReplayBuffer:
         for i, e in zip(indices, errors):
             self.priorities[i] = abs(e) + offset
 
+
+    def save(self, folder_name):
+        """Save the replay buffer to a folder"""
+
+        if not os.path.isdir(folder_name):
+            os.mkdir(folder_name)
+
+        np.save(folder_name + '/actions.npy', self.actions)
+        if SAVE_FRAMES:
+            np.save(folder_name + '/frames.npy', self.frames)
+        np.save(folder_name + '/rewards.npy', self.rewards)
+        np.save(folder_name + '/terminal_flags.npy', self.terminal_flags)
+
+    def load(self, folder_name):
+        """Loads the replay buffer from a folder"""
+        self.actions = np.load(folder_name + '/actions.npy')
+        self.frames = np.load(folder_name + '/frames.npy')
+        self.rewards = np.load(folder_name + '/rewards.npy')
+        self.terminal_flags = np.load(folder_name + '/terminal_flags.npy')
+
 class Agent:
     """Implements a standard DQN agent"""
     def __init__(self,
                  dqn,
                  target_dqn,
-                 replay_buffer,
                  n_actions,
                  input_shape,
                  batch_size=32,
@@ -196,8 +227,8 @@ class Agent:
                  eps_final=0.2,
                  eps_final_frame=0.1,
                  eps_evaluation=0.0,
-                 eps_annealing_frames=150000,
-                 replay_buffer_start_size=8000,
+                 eps_annealing_frames=EPS_ANNEALING_FRAMES,
+                 replay_buffer_start_size=MIN_REPLAY_BUFFER_SIZE,
                  max_frames=TOTAL_FRAMES,
                  use_per=True):
         """
@@ -228,7 +259,7 @@ class Agent:
         self.max_frames = max_frames
         self.batch_size = batch_size
 
-        self.replay_buffer = replay_buffer
+        # self.replay_buffer = replay_buffer
         self.use_per = use_per
 
         # Epsilon information
@@ -291,11 +322,11 @@ class Agent:
         """Update the target Q network"""
         self.target_dqn.set_weights(self.DQN.get_weights())
 
-    def add_experience(self, action, frame, reward, terminal, clip_reward=True):
-        """Wrapper function for adding an experience to the Agent's replay buffer"""
-        self.replay_buffer.add_experience(action, frame, reward, terminal, clip_reward)
+    # def add_experience(self, action, frame, reward, terminal, clip_reward=True):
+    #     """Wrapper function for adding an experience to the Agent's replay buffer"""
+    #     self.replay_buffer.add_experience(action, frame, reward, terminal, clip_reward)
 
-    def learn(self, batch_size, gamma, frame_number, priority_scale=1.0):
+    def learn(self, replay_buffer, batch_size, gamma, frame_number, priority_scale=1.0):
         """Sample a batch and use it to improve the DQN
         Arguments:
             batch_size: How many samples to draw for an update
@@ -309,11 +340,11 @@ class Agent:
         if self.use_per:
             (states, actions, rewards, new_states,
              terminal_flags), importance, indices = \
-                self.replay_buffer.get_minibatch(batch_size=self.batch_size, priority_scale=priority_scale)
+                replay_buffer.get_minibatch(batch_size=self.batch_size, priority_scale=priority_scale)
             importance = importance ** (1 - self.calc_epsilon(frame_number))
         else:
             states, actions, rewards, new_states, terminal_flags = \
-                self.replay_buffer.get_minibatch(batch_size=self.batch_size, priority_scale=priority_scale)
+                replay_buffer.get_minibatch(batch_size=self.batch_size, priority_scale=priority_scale)
 
         # Main DQN estimates best action in new states
         arg_q_max = self.DQN.predict(new_states).argmax(axis=1)
@@ -342,6 +373,30 @@ class Agent:
         self.DQN.optimizer.apply_gradients(zip(model_gradients, self.DQN.trainable_variables))
 
         if self.use_per:
-            self.replay_buffer.set_priorities(indices, error)
+            replay_buffer.set_priorities(indices, error)
 
         return float(loss.numpy()), error
+
+
+    def save(self, folder_name, **kwargs):
+        """Saves the Agent and all corresponding properties into a folder
+        Arguments:
+            folder_name: Folder in which to save the Agent
+            **kwargs: Agent.save will also save any keyword arguments passed.  This is used for saving the frame_number
+        """
+
+        # Create the folder for saving the agent
+        if not os.path.isdir(folder_name):
+            os.makedirs(folder_name)
+
+        # Save DQN and target DQN
+        self.DQN.save(folder_name + '/dqn.h5')
+        self.target_dqn.save(folder_name + '/target_dqn.h5')
+
+        # Save replay buffer
+        # replay_buffer.save(folder_name + '/replay-buffer')
+
+        # Save meta
+        # with open(folder_name + '/meta.json', 'w+') as f:
+        #     f.write(json.dumps({**{'buff_count': replay_buffer.count, 'buff_curr': replay_buffer.current},
+        #                         **kwargs}))  # save replay_buffer information and any other information

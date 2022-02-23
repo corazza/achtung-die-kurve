@@ -10,7 +10,8 @@ Achtung Die Kurve environment implementation taken from https://github.com/erikb
 3. (you need to be able to run `python` from the Anaconda Prompt)
 4. `pip install gym`
 5. `pip install pygame`
-6. `python kurve.py`
+6. `pip install h5py==2.10.0`
+7. `python kurve.py`
 
 # Usage
 

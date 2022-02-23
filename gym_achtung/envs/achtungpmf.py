@@ -35,7 +35,6 @@ BEAM_MAX_ANGLE = 120
 BEAM_STEP = 30
 BEAMS = range(BEAM_MAX_ANGLE, -BEAM_MAX_ANGLE-BEAM_STEP, -BEAM_STEP)
 
-
 class AchtungPlayer:
     def __init__(self, color, width):
         self.color = color
@@ -48,7 +47,7 @@ class AchtungPlayer:
         self.y = random.randrange(50, WINHEIGHT - WINHEIGHT/4)
         self.angle = random.randrange(0, 360)
         self.sight = BEAM_SIGHT
-        self.beams = np.ones(len(BEAMS)) * BEAM_SIGHT
+        self.beams = np.ones(len(BEAMS))
 
     def move(self):
         # computes current movement
@@ -60,7 +59,6 @@ class AchtungPlayer:
         self.y += int(RADIUS * SPEED_CONSTANT * math.sin(math.radians(self.angle)))
 
     def beambounce(self, current_angle, screen):
-        _distance = self.sight
         for i in range(1, self.sight + 1):
             _x = self.x + i * int(RADIUS * SPEED_CONSTANT * math.cos(math.radians(current_angle)))
             _y = self.y + i * int(RADIUS * SPEED_CONSTANT * math.sin(math.radians(current_angle)))
@@ -74,10 +72,9 @@ class AchtungPlayer:
                 d_bounce = screen.get_at((_x, _y)) != BG_COLOR
 
             if d_bounce or i == self.sight:
-                _distance = int(np.round(math.sqrt((self.x - _x) ** 2 + (self.y - _y) ** 2)))
                 break
 
-        return _distance
+        return float(i) / self.sight - 0.5
 
     def beam(self, screen):
         for index, angle in enumerate(BEAMS):
@@ -119,8 +116,8 @@ class AchtungPmf(gym.Env):
 
     """
 
-    def __init__(self,
-                 width=WINWIDTH + TEXT_SPACING,
+    def __init__(self, use_pygame=True,
+                 width=WINWIDTH,
                  height=WINHEIGHT, fps=30, frame_skip=1, num_steps=1,
                  force_fps=True, add_noop_action=True, rng=24):
 
@@ -129,11 +126,14 @@ class AchtungPmf(gym.Env):
             "right": K_d,
         }
 
+        self.use_pygame = use_pygame
         self.score = 0.0  # required.
+        self.other_score = 0.0
         self.lives = 0  # required. Can be 0 or -1 if not required.
+        self.other_lives = 0  # required. Can be 0 or -1 if not required.
         self.ticks = 0
         self.previous_score = 0
-        self.frame_count = 0
+        self.previous_score_other = 0
         self.fps = fps
         self.frame_skip = frame_skip
         self.num_steps = num_steps
@@ -149,18 +149,16 @@ class AchtungPmf(gym.Env):
         self.rng = None
         self._action_set = self.getActions()
         self.action_space = spaces.Discrete(len(self._action_set))
-        self.observation_space = spaces.Box(low=0, high=WINWIDTH, shape=(12,), dtype = np.uint8)
+        self.observation_space = spaces.Box(low=0, high=WINWIDTH, shape=(12,), dtype = np.float32)
         self.rewards = {    # TODO: take as input
                     "positive": 1.0,
                     "negative": -1.0,
-                    "tick": 1,
-                    "loss": 0,
-                    "win": 5.0
+                    "tick": 0.0,
+                    "loss": -1.0,
+                    "win": 0.0,
                 }
         self.BG_COLOR = BG_COLOR
-
         self._setup()
-        self.init()
         self.my_font = pygame.font.SysFont('bauhaus93', 12)
 
     def _setup(self):
@@ -168,7 +166,10 @@ class AchtungPmf(gym.Env):
         Setups up the pygame env, the display and game clock.
         """
         pygame.init()
-        self.screen = pygame.display.set_mode(self.getScreenDims())
+        if self.use_pygame:
+            self.screen = pygame.display.set_mode(self.getScreenDims())
+        else:
+            self.screen = pygame.Surface(self.getScreenDims())
         self.clock = pygame.time.Clock()
 
     def getActions(self):
@@ -194,14 +195,14 @@ class AchtungPmf(gym.Env):
             actions.append(self.NOOP)
         return actions
 
-    def _randomize_other_control(self):
-        x = random.random()
-        if self.ticks % 10 == 0:
-            if x < 0.5:
-                self.other_agent.angle += 10
-            else:
-                self.other_agent.angle -= 10
-            self.other_agent.angle = self.other_agent.angle % 360
+    # def _randomize_other_control(self):
+    #     x = random.random()
+    #     if self.ticks % 5 == 0:
+    #         if x < 0.5:
+    #             self.other_agent.angle += 10
+    #         else:
+    #             self.other_agent.angle -= 10
+    #         self.other_agent.angle = self.other_agent.angle % 360
 
     def _handle_player_events(self):
         for event in pygame.event.get():
@@ -215,48 +216,8 @@ class AchtungPmf(gym.Env):
                     pygame.quit()
                     sys.exit()
 
-    def act(self, action):
-        """
-        Perform an action on the game. We lockstep frames with actions. If act is not called the game will not run.
-
-        Parameters
-        ----------
-
-        action : int
-            The index of the action we wish to perform. The index usually corresponds to the index item returned by getActionSet().
-
-        Returns
-        -------
-
-        int
-            Returns the reward that the agent has accumlated while performing the action.
-
-        """
-        return sum(self._oneStepAct(action) for i in range(self.frame_skip))
-
-    def _oneStepAct(self, action):
-        """
-        Performs an action on the game. Checks if the game is over or if the provided action is valid based on the allowed action set.
-        """
-
-        if self.game_over():
-            return 0.0
-
-        if action not in self.getActions():
-            action = self.NOOP
-
-        for i in range(self.num_steps):
-            time_elapsed = self._tick()
-            if action == self.actions["left"]:
-                self.agent.angle -= 10
-            if action == self.actions["right"]:
-                self.agent.angle += 10
-            self.agent.angle = self.agent.angle % 360
-            self._step()
-
-        self.frame_count += self.num_steps
-
-        return self._getReward()
+    def set_action_other(self, a):
+        self.action_other = self._action_set[a]
 
     def _getReward(self):
         """
@@ -265,6 +226,11 @@ class AchtungPmf(gym.Env):
         reward = self.getScore() - self.previous_score
         self.previous_score = self.getScore()
 
+        return reward
+
+    def _getRewardOther(self):
+        reward = self.getScoreOther() - self.previous_score_other
+        self.previous_score_other = self.getScoreOther()
         return reward
 
     def _tick(self):
@@ -282,8 +248,8 @@ class AchtungPmf(gym.Env):
         """
         return self.clock.tick_busy_loop(fps)
 
-    def getGameState(self):
-        state = np.hstack(([self.agent.x, self.agent.y, self.agent.angle], self.agent.beams))
+    def getGameState(self, agent):
+        state = np.hstack(([float(agent.x)/WINWIDTH - 0.5, float(agent.y)/WINHEIGHT - 0.5, float(agent.angle)/360 - 0.5], agent.beams))
         return state
 
     def getScreenDims(self):
@@ -291,6 +257,9 @@ class AchtungPmf(gym.Env):
 
     def getScore(self):
         return self.score
+
+    def getScoreOther(self):
+        return self.other_score
 
     def game_over(self):
         # return self.lives == -1
@@ -300,46 +269,6 @@ class AchtungPmf(gym.Env):
     def setRNG(self, rng):
         if self.rng is None:
             self.rng = rng
-
-    def init(self):
-        """
-            Starts/Resets the game to its inital state
-        """
-        self.agent = AchtungPlayer(BLUE, RADIUS)
-        self.other_agent = AchtungPlayer(GREEN, RADIUS)
-        self.screen.fill(self.BG_COLOR)
-        self.score = 0
-        self.other_score = 0
-        self.ticks = 0
-        self.lives = 1
-        self.other_lives = 1
-        self.sight = BEAM_SIGHT
-
-    def _step(self):
-        """
-            Perform one step of game emulation.
-        """
-        self.ticks += 1
-        self.score += self.rewards["tick"]
-        self.other_score += self.rewards['tick']
-
-        self._handle_player_events()
-        self._randomize_other_control()
-        self.other_agent.update()
-        if self.collision(self.other_agent.x, self.other_agent.y, self.other_agent.skip):
-            self.other_lives -= 1
-            self.reset()
-        self.other_agent.beam(self.screen)
-        self.other_agent.draw(self.screen)
-
-        self.agent.update()
-        if self.collision(self.agent.x, self.agent.y, self.agent.skip):
-            self.lives -= 1
-        self.agent.beam(self.screen)
-        self.agent.draw(self.screen)
-
-
-        self.draw_text()
 
     def collision(self, x, y, skip):
         collide_check = 0
@@ -360,25 +289,85 @@ class AchtungPmf(gym.Env):
         else:
             return False
 
+    def execute_action(self, action, agent):
+        if action not in self.getActions():
+            action = self.NOOP
+
+        if action == self.actions["left"]:
+            agent.angle -= 10
+        if action == self.actions["right"]:
+            agent.angle += 10
+
+        agent.angle = agent.angle % 360
+
+    def _step(self):
+        self.ticks += 1
+        self.score += self.rewards["tick"]
+        self.other_score += self.rewards['tick']
+
+        self.other_agent.update()
+        if self.collision(self.other_agent.x, self.other_agent.y, self.other_agent.skip):
+            self.other_lives -= 1
+            self.other_score += self.rewards['loss']
+            self.score += self.rewards['win']
+        self.other_agent.beam(self.screen)
+        self.other_agent.draw(self.screen)
+
+        self.agent.update()
+        if self.collision(self.agent.x, self.agent.y, self.agent.skip):
+            self.lives -= 1
+            self.score += self.rewards['loss']
+            self.other_score += self.rewards['win']
+        self.agent.beam(self.screen)
+        self.agent.draw(self.screen)
+
     def step(self, a):
-        reward = self.act(self._action_set[a])
-        state = self.getGameState()
+        action = self._action_set[a]
+        if self.use_pygame:
+            self._handle_player_events()
+            time_elapsed = self._tick() # this ensures FPS, unwanted without display
+
+        self.execute_action(action, self.agent)
+        self.execute_action(self.action_other, self.other_agent)
+        self._step()
+
+        reward = self._getReward()
+        other_reward = self._getRewardOther()
+
+        state = self.getGameState(self.agent)
+        other_state = self.getGameState(self.other_agent)
         terminal = self.game_over()
-        return state, reward, terminal, {}
+
+        info = {}
+        info['other_reward'] = other_reward
+        info['other_state'] = other_state
+
+        return state, reward, terminal, info
 
     def reset(self):
-        self.observation_space = spaces.Box(low=0, high=WINWIDTH, shape=(12,), dtype=np.uint8)
         self.action = []
         self.previous_score = 0.0
-        self.init()
-        state = self.getGameState()
-        return state
+        self.previous_score_other = 0.0
+        self.agent = AchtungPlayer(BLUE, RADIUS)
+        self.other_agent = AchtungPlayer(GREEN, RADIUS)
+        self.screen.fill(self.BG_COLOR)
+        self.score = 0
+        self.other_score = 0
+        self.ticks = 0
+        self.lives = 1
+        self.other_lives = 1
+        self.sight = BEAM_SIGHT
+        state = self.getGameState(self.agent)
+        other_state = self.getGameState(self.other_agent)
+        info = {}
+        info['other_state'] = other_state
+        return state, info
 
     def draw_text(self):
         pygame.draw.rect(self.screen, WHITE, (WINWIDTH, 0, 10, WINHEIGHT))
         pygame.draw.rect(self.screen, BG_COLOR, (WINWIDTH + 10, 0, 120, WINHEIGHT))
 
-        state = self.getGameState()
+        state = self.getGameState(self.agent)
         x_msg = self.my_font.render("X:{}".format(state[0]), 1, WHITE)
         y_msg = self.my_font.render("Y:{}".format(state[1]), 1, WHITE)
         a_msg = self.my_font.render("A:{}".format(state[2]), 1, WHITE)
@@ -406,6 +395,7 @@ class AchtungPmf(gym.Env):
         self.screen.blit(b9_msg, (WINWIDTH + TEXT_SPACING - 108, 440))
 
     def render(self, mode='human', close=False):
+        # self.draw_text()
         pygame.display.update()
 
     def seed(self, seed):
