@@ -29,7 +29,7 @@ def main(path):
     MAIN_TARGET_DQN.load_weights(path+'/target_dqn.h5')
 
     main_agent = Agent(MAIN_DQN, MAIN_TARGET_DQN, env.action_space.n,
-                       input_shape, batch_size=BATCH_SIZE, use_per=USE_PER, history_length=env.history_length)
+                       input_shape, batch_size=BATCH_SIZE, history_length=env.history_length)
 
     while frame_counter < TOTAL_FRAMES:
         obs, info = env.reset()

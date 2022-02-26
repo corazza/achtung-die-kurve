@@ -12,6 +12,7 @@ from agent import build_q_network
 from agent import ReplayBuffer
 from agent import Agent
 from const import *
+import pygame
 from state_repeater import StateRepeater
 
 def main(save_id):
@@ -26,18 +27,20 @@ def main(save_id):
     MAIN_DQN = build_q_network(env.action_space.n, input_shape, env.history_length, LEARNING_RATE)
     MAIN_TARGET_DQN = build_q_network(env.action_space.n, input_shape, env.history_length, LEARNING_RATE)
 
-    main_replay_buffer = ReplayBuffer(input_shape, size=MEM_SIZE, use_per=USE_PER, history_length=env.history_length)
+    main_replay_buffer = ReplayBuffer(input_shape, size=MEM_SIZE, history_length=env.history_length)
 
     main_agent = Agent(MAIN_DQN, MAIN_TARGET_DQN, env.action_space.n,
-                       input_shape, batch_size=BATCH_SIZE, use_per=USE_PER, history_length=env.history_length)
+                       input_shape, batch_size=BATCH_SIZE, history_length=env.history_length)
 
     OTHER_DQN = build_q_network(env.action_space.n, input_shape, env.history_length, LEARNING_RATE)
     OTHER_TARGET_DQN = build_q_network(env.action_space.n, input_shape, env.history_length, LEARNING_RATE)
 
-    other_replay_buffer = ReplayBuffer(input_shape, size=MEM_SIZE, use_per=USE_PER, history_length=env.history_length)
+    other_replay_buffer = ReplayBuffer(input_shape, size=MEM_SIZE, history_length=env.history_length)
 
     other_agent = Agent(OTHER_DQN, OTHER_TARGET_DQN, env.action_space.n,
-                       input_shape, batch_size=BATCH_SIZE, use_per=USE_PER, history_length=env.history_length)
+                       input_shape, batch_size=BATCH_SIZE, history_length=env.history_length)
+
+    last_percent = 0
 
     while frame_counter < TOTAL_FRAMES:
         obs, info = env.reset()
@@ -69,19 +72,25 @@ def main(save_id):
             other_replay_buffer.add_experience(action=other_action, frame=other_obs, reward=other_rew, clip_reward=False, terminal=done)
 
             if frame_counter % UPDATE_FREQ == 0 and main_replay_buffer.count > MIN_REPLAY_BUFFER_SIZE:
-                loss, _ = main_agent.learn(main_replay_buffer, BATCH_SIZE, gamma=DISCOUNT_FACTOR,
-                                                frame_number=frame_counter,
-                                            priority_scale=PRIORITY_SCALE)
-                loss, _ = other_agent.learn(other_replay_buffer, BATCH_SIZE, gamma=DISCOUNT_FACTOR,
-                                                frame_number=frame_counter,
-                                            priority_scale=PRIORITY_SCALE)
+                loss, _ = main_agent.learn(main_replay_buffer, BATCH_SIZE, gamma=DISCOUNT_FACTOR, use_per=USE_PER,
+                                                frame_number=frame_counter, priority_scale=PRIORITY_SCALE)
+                loss, _ = other_agent.learn(other_replay_buffer, BATCH_SIZE, gamma=DISCOUNT_FACTOR, use_per=USE_PER,
+                                                frame_number=frame_counter, priority_scale=PRIORITY_SCALE)
+                
+            if frame_counter % SHARE_EXP_FREQ == 0 and main_replay_buffer.count > MIN_REPLAY_BUFFER_SIZE:
+                loss, _ = main_agent.learn(other_replay_buffer, BATCH_SIZE, gamma=DISCOUNT_FACTOR, use_per=False,
+                                                frame_number=frame_counter, priority_scale=PRIORITY_SCALE)
+                loss, _ = other_agent.learn(main_replay_buffer, BATCH_SIZE, gamma=DISCOUNT_FACTOR, use_per=False,
+                                                frame_number=frame_counter, priority_scale=PRIORITY_SCALE)
+                
 
             if frame_counter % TARGET_UPDATE_FREQ == 0 and frame_counter > MIN_REPLAY_BUFFER_SIZE:
                 main_agent.update_target_network()
                 other_agent.update_target_network()
-                # IPython.embed()
 
         percent_done = int(float(frame_counter)/TOTAL_FRAMES * 100)
+        pygame.display.set_caption(f'{frame_counter}/{TOTAL_FRAMES} ({percent_done}%)')
+        # last_percent = percent_done
         print(f'episode_reward={episode_rew}, other_reward={other_episode_rew}, step={frame_counter}/{TOTAL_FRAMES} ({percent_done}%), eps={main_agent.calc_epsilon(frame_counter)}')
         episode_rewards.append(episode_rew)
 

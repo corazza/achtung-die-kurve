@@ -8,6 +8,7 @@ import tensorflow as tf
 import numpy as np
 import IPython
 import os
+import random
 import json
 
 from const import *
@@ -20,63 +21,23 @@ class RandomAgent(object):
     def act(self, observation, reward, done):
         return self.action_space.sample()
 
-# def build_q_network_old(n_actions, input_shape, history_length, learning_rate):
-#     """Builds a dueling DQN as a Keras model
-#     Arguments:
-#         n_actions: Number of possible action the agent can take
-#         learning_rate: Learning rate
-#         input_shape: Shape of the preprocessed frame the model sees
-#         history_length: Number of historical frames the agent can see
-#     Returns:
-#         A compiled Keras model
-#     """
-#     model_input = Input(shape=(input_shape[0], input_shape[1], history_length))
-#     x = Lambda(lambda layer: layer / 255)(model_input)
+def build_q_network(n_actions, input_shape, history_length, initial_learning_rate):
+    # lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+    #     initial_learning_rate,
+    #     decay_steps=DECAY_STEPS,
+    #     decay_rate=DECAY_RATE,
+    #     staircase=True)
 
-#     x = Conv2D(32, (8, 8), strides=4, kernel_initializer=VarianceScaling(scale=2.), activation='relu', use_bias=False)(
-#         x)
-#     x = Conv2D(64, (4, 4), strides=2, kernel_initializer=VarianceScaling(scale=2.), activation='relu', use_bias=False)(
-#         x)
-#     x = Conv2D(64, (3, 3), strides=1, kernel_initializer=VarianceScaling(scale=2.), activation='relu', use_bias=False)(
-#         x)
-#     x = Conv2D(1024, (7, 7), strides=1, kernel_initializer=VarianceScaling(scale=2.), activation='relu',
-#                use_bias=False)(x)
-
-#     val_stream, adv_stream = Lambda(lambda w: tf.split(w, 2, 3))(x)
-
-#     val_stream = Flatten()(val_stream)
-#     val = Dense(1, kernel_initializer=VarianceScaling(scale=2.))(val_stream)
-
-#     adv_stream = Flatten()(adv_stream)
-#     adv = Dense(n_actions, kernel_initializer=VarianceScaling(scale=2.))(adv_stream)
-
-#     reduce_mean = Lambda(lambda w: tf.reduce_mean(w, axis=1, keepdims=True))
-
-#     q_vals = Add()([val, Subtract()([adv, reduce_mean(adv)])])
-
-#     model = Model(model_input, q_vals)
-#     model.compile(Adam(learning_rate), loss=tf.keras.losses.Huber())
-#     IPython.embed()
-#     return model
-
-def build_q_network(n_actions, input_shape, history_length, learning_rate):
     init = tf.initializers.he_uniform()
     inputs = Input(shape=(input_shape[0], history_length), name='inputs')
     flat = Flatten(name='flat')(inputs)
     layer1 = Dense(24, activation="relu", name='layer1', kernel_initializer=init)(flat)
-    layer2 = Dense(12, activation="relu", name='layer2', kernel_initializer=init)(layer1)
-    layer3 = Dense(6, activation="relu", name='layer3', kernel_initializer=init)(layer2)
-    action = Dense(n_actions, activation="linear", name='action', kernel_initializer=init)(layer3)
+    layer2 = Dense(14, activation="relu", name='layer2', kernel_initializer=init)(layer1)
+    layer3 = Dense(8, activation="relu", name='layer3', kernel_initializer=init)(layer2)
+    layer4 = Dense(6, activation="relu", name='layer4', kernel_initializer=init)(layer3)
+    action = Dense(n_actions, activation="linear", name='action', kernel_initializer=init)(layer4)
     model = Model(inputs=inputs, outputs=action)
-    model.compile(Adam(learning_rate), loss=tf.keras.losses.Huber())
-
-    # model = tf.keras.Sequential()
-    # model.add(tf.keras.layers.Flatten())
-    # model.add(tf.keras.layers.Dense(24, input_shape=(input_shape[0], history_length), activation='relu', kernel_initializer=init))
-    # model.add(tf.keras.layers.Dense(12, activation='relu', kernel_initializer=init))
-    # model.add(tf.keras.layers.Dense(n_actions, activation='linear', kernel_initializer=init))
-
-    # model.compile(loss=tf.keras.losses.Huber(), optimizer=tf.keras.optimizers.Adam(lr=learning_rate), metrics=['accuracy'])
+    model.compile(Adam(learning_rate=initial_learning_rate), loss=tf.keras.losses.Huber())
     return model
 
 class ReplayBuffer:
@@ -99,8 +60,6 @@ class ReplayBuffer:
         self.frames = np.empty((self.size, self.input_shape[0]), dtype=np.float32)
         self.terminal_flags = np.empty(self.size, dtype=np.bool)
         self.priorities = np.zeros(self.size, dtype=np.float32)
-
-        self.use_per = use_per
 
     def add_experience(self, action, frame, reward, terminal, clip_reward=True):
         """Saves a transition to the replay buffer
@@ -126,7 +85,7 @@ class ReplayBuffer:
         self.count = max(self.count, self.current + 1)
         self.current = (self.current + 1) % self.size
 
-    def get_minibatch(self, batch_size=32, priority_scale=0.0):
+    def get_minibatch(self, batch_size=32, priority_scale=0.0, use_per=True):
         """Returns a minibatch of self.batch_size = 32 transitions
         Arguments:
             batch_size: How many samples to return
@@ -142,7 +101,7 @@ class ReplayBuffer:
             raise ValueError('Not enough memories to get a minibatch')
 
         # Get sampling probabilities from priority list
-        if self.use_per:
+        if use_per:
             scaled_priorities = self.priorities[self.history_length:self.count - 1] ** priority_scale
             sample_probabilities = scaled_priorities / sum(scaled_priorities)
 
@@ -151,7 +110,7 @@ class ReplayBuffer:
         for i in range(batch_size):
             while True:
                 # Get a random number from history_length to maximum frame written with probabilities based on priority weights
-                if self.use_per:
+                if use_per:
                     index = np.random.choice(np.arange(self.history_length, self.count - 1), p=sample_probabilities)
                 else:
                     index = random.randint(self.history_length, self.count - 1)
@@ -174,7 +133,7 @@ class ReplayBuffer:
         states = np.transpose(np.asarray(states), axes=(0, 2, 1))
         new_states = np.transpose(np.asarray(new_states), axes=(0, 2, 1))
 
-        if self.use_per:
+        if use_per:
             # Get importance weights from probabilities calculated earlier
             importance = 1 / self.count * 1 / sample_probabilities[[index - 4 for index in indices]]
             importance = importance / importance.max()
@@ -229,8 +188,7 @@ class Agent:
                  eps_evaluation=0.0,
                  eps_annealing_frames=EPS_ANNEALING_FRAMES,
                  replay_buffer_start_size=MIN_REPLAY_BUFFER_SIZE,
-                 max_frames=TOTAL_FRAMES,
-                 use_per=True):
+                 max_frames=TOTAL_FRAMES):
         """
         Arguments:
             dqn: A DQN (returned by the DQN function) to predict moves
@@ -258,9 +216,6 @@ class Agent:
         self.replay_buffer_start_size = replay_buffer_start_size
         self.max_frames = max_frames
         self.batch_size = batch_size
-
-        # self.replay_buffer = replay_buffer
-        self.use_per = use_per
 
         # Epsilon information
         self.eps_initial = eps_initial
@@ -326,7 +281,7 @@ class Agent:
     #     """Wrapper function for adding an experience to the Agent's replay buffer"""
     #     self.replay_buffer.add_experience(action, frame, reward, terminal, clip_reward)
 
-    def learn(self, replay_buffer, batch_size, gamma, frame_number, priority_scale=1.0):
+    def learn(self, replay_buffer, batch_size, gamma, frame_number, priority_scale=1.0, use_per=True):
         """Sample a batch and use it to improve the DQN
         Arguments:
             batch_size: How many samples to draw for an update
@@ -337,14 +292,14 @@ class Agent:
             The loss between the predicted and target Q as a float
         """
 
-        if self.use_per:
+        if use_per:
             (states, actions, rewards, new_states,
              terminal_flags), importance, indices = \
-                replay_buffer.get_minibatch(batch_size=self.batch_size, priority_scale=priority_scale)
+                replay_buffer.get_minibatch(use_per=use_per, batch_size=self.batch_size, priority_scale=priority_scale)
             importance = importance ** (1 - self.calc_epsilon(frame_number))
         else:
             states, actions, rewards, new_states, terminal_flags = \
-                replay_buffer.get_minibatch(batch_size=self.batch_size, priority_scale=priority_scale)
+                replay_buffer.get_minibatch(use_per=use_per, batch_size=self.batch_size, priority_scale=priority_scale)
 
         # Main DQN estimates best action in new states
         arg_q_max = self.DQN.predict(new_states).argmax(axis=1)
@@ -366,13 +321,13 @@ class Agent:
             error = Q - target_q
             loss = tf.keras.losses.Huber()(target_q, Q)
 
-            if self.use_per:
+            if use_per:
                 loss = tf.reduce_mean(loss * importance)
 
         model_gradients = tape.gradient(loss, self.DQN.trainable_variables)
         self.DQN.optimizer.apply_gradients(zip(model_gradients, self.DQN.trainable_variables))
 
-        if self.use_per:
+        if use_per:
             replay_buffer.set_priorities(indices, error)
 
         return float(loss.numpy()), error

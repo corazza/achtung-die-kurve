@@ -153,7 +153,7 @@ class AchtungPmf(gym.Env):
         self.rewards = {    # TODO: take as input
                     "positive": 1.0,
                     "negative": -1.0,
-                    "tick": 0.0,
+                    "tick": 0.005,
                     "loss": -1.0,
                     "win": 0.0,
                 }
@@ -171,7 +171,8 @@ class AchtungPmf(gym.Env):
         else:
             self.screen = pygame.Surface(self.getScreenDims())
         self.clock = pygame.time.Clock()
-
+        pygame.display.set_caption('test caption')
+        
     def getActions(self):
         """
         Gets the actions the game supports. Optionally inserts the NOOP
