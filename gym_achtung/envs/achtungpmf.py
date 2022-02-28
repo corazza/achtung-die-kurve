@@ -116,7 +116,7 @@ class AchtungPmf(gym.Env):
 
     """
 
-    def __init__(self, use_pygame=True,
+    def __init__(self, use_pygame=True, other_human=False,
                  width=WINWIDTH,
                  height=WINHEIGHT, fps=30, frame_skip=1, num_steps=1,
                  force_fps=True, add_noop_action=True, rng=24):
@@ -127,6 +127,7 @@ class AchtungPmf(gym.Env):
         }
 
         self.use_pygame = use_pygame
+        self.other_human = other_human
         self.score = 0.0  # required.
         self.other_score = 0.0
         self.lives = 0  # required. Can be 0 or -1 if not required.
@@ -146,6 +147,7 @@ class AchtungPmf(gym.Env):
         self.screen_dim = (width, height)  # width and height
         self.allowed_fps = None  # fps that the game is allowed to run at.
         self.NOOP = K_F15  # the noop key
+        self.action_other = self.NOOP
         self.rng = None
         self._action_set = self.getActions()
         self.action_space = spaces.Discrete(len(self._action_set))
@@ -216,6 +218,23 @@ class AchtungPmf(gym.Env):
                 if key == pygame.K_ESCAPE:
                     pygame.quit()
                     sys.exit()
+
+                if self.other_human:
+                    if key == self.actions["left"]:
+                        self.set_action_other(0)
+
+                    if key == self.actions["right"]:
+                        self.set_action_other(1)
+
+            if event.type == pygame.KEYUP:
+                key = event.key
+                if self.other_human:
+                    if key == self.actions["left"]:
+                        self.set_action_other(2)
+
+                    if key == self.actions["right"]:
+                        self.set_action_other(2)
+
 
     def set_action_other(self, a):
         self.action_other = self._action_set[a]

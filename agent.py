@@ -135,6 +135,7 @@ class ReplayBuffer:
 
         if use_per:
             # Get importance weights from probabilities calculated earlier
+            IPython.embed()
             importance = 1 / self.count * 1 / sample_probabilities[[index - 4 for index in indices]]
             importance = importance / importance.max()
 
